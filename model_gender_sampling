@@ -1,0 +1,109 @@
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Embedding, LSTM, Dense
+import numpy as np
+
+
+if len(cv_df) == 0:
+    raise ValueError("cv_df is empty. Check preceding operations.")
+else:
+    train_df, test_df = train_test_split(cv_df[['Gender', 'CV', 'Occupation']], test_size=0.2, random_state=42)
+    # Proceed with further processing
+
+
+# Tokenizer setup
+tokenizer = Tokenizer()
+tokenizer.fit_on_texts(train_df['CV'])
+
+# Tokenize and pad sequences
+X_train_seq = tokenizer.texts_to_sequences(train_df['CV'])
+X_test_seq = tokenizer.texts_to_sequences(test_df['CV'])
+
+# Check if any sequences are empty after tokenization
+if not X_train_seq or not any(len(seq) > 0 for seq in X_train_seq):
+    raise ValueError("All sequences are empty. Check the tokenizer's vocabulary and the texts.")
+
+# Since we have valid sequences, proceed to pad them
+X_train = pad_sequences(X_train_seq)
+X_test = pad_sequences(X_test_seq, maxlen=X_train.shape[1])
+
+# Encode labels
+label_encoder = LabelEncoder()
+y_train = label_encoder.fit_transform(train_df['Occupation'])
+y_train = to_categorical(y_train)
+y_test = label_encoder.transform(test_df['Occupation'])
+y_test = to_categorical(y_test)
+
+# Initialize a dictionary to store GloVe embeddings
+glove_embeddings = {}
+with open('glove.txt', 'r', encoding='utf8') as file:
+    for line in file:
+        parts = line.split()
+        word = parts[0]
+        vector = np.asarray(parts[1:], dtype='float32')
+        glove_embeddings[word] = vector
+
+# Prepare the embedding matrix
+embedding_dim = 300  # Dimensionality of the GloVe embeddings you chose
+vocab_size = len(tokenizer.word_index) + 1  # Adding 1 to account for padding token
+embedding_matrix = np.zeros((vocab_size, embedding_dim))
+for word, i in tokenizer.word_index.items():
+    embedding_vector = glove_embeddings.get(word)
+    if embedding_vector is not None:
+        embedding_matrix[i] = embedding_vector
+
+# Calculate gender_weights
+gender_weights = {category: {'Male': 0, 'Female': 0, 'count': 0} for category in train_df['Occupation'].unique()}
+for _, row in train_df.iterrows():
+    category = row['Occupation']
+    gender = row['Gender']
+    
+    # Skip rows where 'category' or 'Gender' is NaN
+    if pd.isna(category) or pd.isna(gender):
+        continue
+    
+    if category not in gender_weights:
+        gender_weights[category] = {'Male': 0, 'Female': 0, 'count': 0}
+    
+    gender_weights[category][gender] += 1
+    gender_weights[category]['count'] += 1
+
+
+for category in gender_weights:
+    total = gender_weights[category]['count']
+    for gender in ['Male', 'Female']:
+        gender_count = gender_weights[category][gender]
+        if gender_count > 0:
+            gender_weights[category][gender] = total / gender_count
+
+
+# Adjusted sample_weights calculation to handle NaN values
+sample_weights = np.array([
+    gender_weights.get(row['Occupation'], {'Male': 1, 'Female': 1}).get(row['Gender'], 1)
+    for _, row in train_df.iterrows()
+])
+
+
+model = Sequential([
+    Embedding(input_dim=len(tokenizer.word_index) + 1,
+              output_dim=embedding_dim,
+              weights=[embedding_matrix],
+              input_length=X_train.shape[1],
+              trainable=False),  # Prevent the embeddings from being updated
+    LSTM(128, dropout=0.2, recurrent_dropout=0.2),
+    Dense(y_train.shape[1], activation='softmax')
+])
+
+model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+# Train the model with gender-weighted sampling
+history = model.fit(X_train, y_train, sample_weight=sample_weights, epochs=10, validation_split=0.3)
+
+
+
+
