@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split, StratifiedShuffleSplit
+from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.preprocessing import LabelEncoder
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
@@ -19,8 +19,8 @@ train_index, temp_index = next(sss.split(cv_df, cv_df['Occupation']))
 train_df = cv_df.iloc[train_index]
 temp_df = cv_df.iloc[temp_index]
 
-# Further split temp_df into test and validation sets
-sss_temp = StratifiedShuffleSplit(n_splits=1, test_size=0.2857, random_state=42)
+# Further split temp_df into test and validation sets (25% test, 10% validation of the original data)
+sss_temp = StratifiedShuffleSplit(n_splits=1, test_size=0.7143, random_state=42)  # 0.7143 of temp_df gives 25% of the original data for test
 test_index, val_index = next(sss_temp.split(temp_df, temp_df['Occupation']))
 test_df = temp_df.iloc[test_index]
 val_df = temp_df.iloc[val_index]
@@ -155,3 +155,5 @@ for i, occupation in enumerate(occupations):
 
 # Convert results to DataFrame for display
 results_df = pd.DataFrame(results, columns=['Occupation', 'Acc.', 'TPR (M)', 'TPR (F)', 'Prec. (M)', 'Prec. (F)', 'TPR Gap', 'Prec. Gap'])
+
+import ace_tools as tools; tools.display_dataframe_to_user(name="Occupation Metrics", dataframe=results_df)
