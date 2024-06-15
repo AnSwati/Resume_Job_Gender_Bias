@@ -1,5 +1,16 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import StratifiedShuffleSplit
+from sklearn.preprocessing import LabelEncoder
+from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Embedding, LSTM, Dense
+from sklearn.metrics import accuracy_score, precision_score, recall_score
+
 # Load the dataset
-cv_df = pd.read_csv('linkedln.csv')
+cv_df = pd.read_csv('path_to_your_dataset.csv')  # Replace with the correct path to your dataset
 
 # Combine 'Skills' and 'Description' into 'CV'
 cv_df['CV'] = cv_df['Description'] + ' ' + cv_df['Skills']
@@ -52,7 +63,7 @@ y_val = to_categorical(y_val)
 
 # Initialize a dictionary to store GloVe embeddings
 glove_embeddings = {}
-with open('/mnt/data/glove.6B.300d.txt', 'r', encoding='utf8') as file:
+with open('path_to_your_glove.txt', 'r', encoding='utf8') as file:  # Replace with the correct path to your GloVe file
     for line in file:
         parts = line.split()
         word = parts[0]
@@ -139,10 +150,10 @@ for i, occupation in enumerate(occupations):
     acc = accuracy_score(occ_df['y_true'], occ_df['y_pred'])
     
     # Calculate TPR and Precision for males and females
-    tpr_m = recall_score(occ_df[occ_df['Gender'] == 'Male']['y_true'], occ_df[occ_df['Gender'] == 'Male']['y_pred'], average='binary', pos_label=i)
-    tpr_f = recall_score(occ_df[occ_df['Gender'] == 'Female']['y_true'], occ_df[occ_df['Gender'] == 'Female']['y_pred'], average='binary', pos_label=i)
-    prec_m = precision_score(occ_df[occ_df['Gender'] == 'Male']['y_true'], occ_df[occ_df['Gender'] == 'Male']['y_pred'], average='binary', pos_label=i)
-    prec_f = precision_score(occ_df[occ_df['Gender'] == 'Female']['y_true'], occ_df[occ_df['Gender'] == 'Female']['y_pred'], average='binary', pos_label=i)
+    tpr_m = recall_score(occ_df[occ_df['Gender'] == 'Male']['y_true'], occ_df[occ_df['Gender'] == 'Male']['y_pred'], average='macro')
+    tpr_f = recall_score(occ_df[occ_df['Gender'] == 'Female']['y_true'], occ_df[occ_df['Gender'] == 'Female']['y_pred'], average='macro')
+    prec_m = precision_score(occ_df[occ_df['Gender'] == 'Male']['y_true'], occ_df[occ_df['Gender'] == 'Male']['y_pred'], average='macro')
+    prec_f = precision_score(occ_df[occ_df['Gender'] == 'Female']['y_true'], occ_df[occ_df['Gender'] == 'Female']['y_pred'], average='macro')
     
     # Calculate TPR Gap and Precision Gap
     tpr_gap = abs(tpr_m - tpr_f)
@@ -154,4 +165,6 @@ for i, occupation in enumerate(occupations):
 # Convert results to DataFrame for display
 results_df = pd.DataFrame(results, columns=['Occupation', 'Acc.', 'TPR (M)', 'TPR (F)', 'Prec. (M)', 'Prec. (F)', 'TPR Gap', 'Prec. Gap'])
 
-import ace_tools as tools; tools.display_dataframe_to_user(name="Occupation Metrics", dataframe=results_df)
+# Display the results
+print(results_df)
+
