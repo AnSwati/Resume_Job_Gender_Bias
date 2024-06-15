@@ -10,13 +10,24 @@ from tensorflow.keras.layers import Embedding, LSTM, Dense
 from sklearn.metrics import accuracy_score, precision_score, recall_score
 
 # Load the dataset
-cv_df = pd.read_csv('path_to_your_dataset.csv')  # Replace with the correct path to your dataset
+
+cv_df = pd.read_csv('linkedin.csv')
+
+# Function to clean 'Skills' column by removing numbered lists
+def clean_skills(skills):
+    return re.sub(r'\d+\.\s*', '', skills)
+
+# Apply the function to the 'Skills' column
+cv_df['Skills'] = cv_df['Skills'].apply(clean_skills)
 
 # Combine 'Skills' and 'Description' into 'CV'
-cv_df['CV'] = cv_df['Description'] + ' ' + cv_df['Skills']
+cv_df['CV'] = cv_df['Description'].astype(str) + ' ' + cv_df['Skills'].astype(str)
 
 # Drop 'Description' and 'Skills' columns
 cv_df.drop(columns=['Description', 'Skills'], inplace=True)
+
+# Display the cleaned dataframe
+print(cv_df.head())
 
 # Ensure cv_df is not empty
 if len(cv_df) == 0:
