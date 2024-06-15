@@ -1,13 +1,11 @@
-import numpy as np
-import pandas as pd
-from sklearn.model_selection import StratifiedShuffleSplit
-from sklearn.preprocessing import LabelEncoder
-from tensorflow.keras.preprocessing.text import Tokenizer
-from tensorflow.keras.preprocessing.sequence import pad_sequences
-from tensorflow.keras.utils import to_categorical
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Embedding, LSTM, Dense
-from sklearn.metrics import accuracy_score, precision_score, recall_score
+# Load the dataset
+cv_df = pd.read_csv('linkedln.csv')
+
+# Combine 'Skills' and 'Description' into 'CV'
+cv_df['CV'] = cv_df['Description'] + ' ' + cv_df['Skills']
+
+# Drop 'Description' and 'Skills' columns
+cv_df.drop(columns=['Description', 'Skills'], inplace=True)
 
 # Ensure cv_df is not empty
 if len(cv_df) == 0:
@@ -54,7 +52,7 @@ y_val = to_categorical(y_val)
 
 # Initialize a dictionary to store GloVe embeddings
 glove_embeddings = {}
-with open('glove.txt', 'r', encoding='utf8') as file:
+with open('/mnt/data/glove.6B.300d.txt', 'r', encoding='utf8') as file:
     for line in file:
         parts = line.split()
         word = parts[0]
