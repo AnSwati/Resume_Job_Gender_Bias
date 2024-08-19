@@ -1,16 +1,16 @@
 import pandas as pd
 import numpy as np
+import re
 from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.preprocessing import LabelEncoder
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.utils import to_categorical
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Embedding, LSTM, Dense
-from sklearn.metrics import accuracy_score, precision_score, recall_score
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, Embedding, LSTM, Dense, Concatenate
+from sklearn.metrics import accuracy_score, recall_score
 
 # Load the dataset
-
 cv_df = pd.read_csv('linkedin.csv')
 
 # Function to clean 'Skills' column by removing numbered lists
@@ -26,9 +26,6 @@ cv_df['CV'] = cv_df['Description'].astype(str) + ' ' + cv_df['Skills'].astype(st
 # Drop 'Description' and 'Skills' columns
 cv_df.drop(columns=['Description', 'Skills'], inplace=True)
 
-# Display the cleaned dataframe
-print(cv_df.head())
-
 # Ensure cv_df is not empty
 if len(cv_df) == 0:
     raise ValueError("cv_df is empty. Check preceding operations.")
@@ -39,8 +36,8 @@ train_index, temp_index = next(sss.split(cv_df, cv_df['Occupation']))
 train_df = cv_df.iloc[train_index]
 temp_df = cv_df.iloc[temp_index]
 
-# Further split temp_df into test and validation sets (25% test, 10% validation of the original data)
-sss_temp = StratifiedShuffleSplit(n_splits=1, test_size=0.7143, random_state=42)  # 0.7143 of temp_df gives 25% of the original data for test
+# Further split temp_df into test and validation sets
+sss_temp = StratifiedShuffleSplit(n_splits=1, test_size=0.7143, random_state=42)
 test_index, val_index = next(sss_temp.split(temp_df, temp_df['Occupation']))
 test_df = temp_df.iloc[test_index]
 val_df = temp_df.iloc[val_index]
@@ -58,10 +55,16 @@ X_val_seq = tokenizer.texts_to_sequences(val_df['CV'])
 if not X_train_seq or not any(len(seq) > 0 for seq in X_train_seq):
     raise ValueError("All sequences are empty. Check the tokenizer's vocabulary and the texts.")
 
-# Since we have valid sequences, proceed to pad them
+# Pad sequences
 X_train = pad_sequences(X_train_seq)
 X_test = pad_sequences(X_test_seq, maxlen=X_train.shape[1])
 X_val = pad_sequences(X_val_seq, maxlen=X_train.shape[1])
+
+# Encode gender
+gender_encoder = LabelEncoder()
+X_train_gender = gender_encoder.fit_transform(train_df['Gender'])
+X_test_gender = gender_encoder.transform(test_df['Gender'])
+X_val_gender = gender_encoder.transform(val_df['Gender'])
 
 # Encode labels
 label_encoder = LabelEncoder()
@@ -74,7 +77,7 @@ y_val = to_categorical(y_val)
 
 # Initialize a dictionary to store GloVe embeddings
 glove_embeddings = {}
-with open('path_to_your_glove.txt', 'r', encoding='utf8') as file:  # Replace with the correct path to your GloVe file
+with open('path_to_your_glove.txt', 'r', encoding='utf8') as file:  # Replace with the correct path
     for line in file:
         parts = line.split()
         word = parts[0]
@@ -82,8 +85,8 @@ with open('path_to_your_glove.txt', 'r', encoding='utf8') as file:  # Replace wi
         glove_embeddings[word] = vector
 
 # Prepare the embedding matrix
-embedding_dim = 300  # Dimensionality of the GloVe embeddings you chose
-vocab_size = len(tokenizer.word_index) + 1  # Adding 1 to account for padding token
+embedding_dim = 300  # Dimensionality of the GloVe embeddings
+vocab_size = len(tokenizer.word_index) + 1
 embedding_matrix = np.zeros((vocab_size, embedding_dim))
 for word, i in tokenizer.word_index.items():
     embedding_vector = glove_embeddings.get(word)
@@ -96,7 +99,6 @@ for _, row in train_df.iterrows():
     category = row['Occupation']
     gender = row['Gender']
     
-    # Skip rows where 'category' or 'Gender' is NaN
     if pd.isna(category) or pd.isna(gender):
         continue
     
@@ -110,30 +112,42 @@ for category in gender_weights:
         if gender_count > 0:
             gender_weights[category][gender] = total / gender_count
 
-# Adjusted sample_weights calculation to handle NaN values
+# Adjusted sample_weights calculation
 sample_weights = np.array([
     gender_weights.get(row['Occupation'], {'Male': 1, 'Female': 1}).get(row['Gender'], 1)
     for _, row in train_df.iterrows()
 ])
 
 # Build and compile the model
-model = Sequential([
-    Embedding(input_dim=len(tokenizer.word_index) + 1,
-              output_dim=embedding_dim,
-              weights=[embedding_matrix],
-              input_length=X_train.shape[1],
-              trainable=False),  # Prevent the embeddings from being updated
-    LSTM(128, dropout=0.2, recurrent_dropout=0.2),
-    Dense(y_train.shape[1], activation='softmax')
-])
+text_input = Input(shape=(X_train.shape[1],))
+gender_input = Input(shape=(1,))
+
+embedding = Embedding(input_dim=len(tokenizer.word_index) + 1,
+                      output_dim=embedding_dim,
+                      weights=[embedding_matrix],
+                      input_length=X_train.shape[1],
+                      trainable=False)(text_input)
+
+lstm_out = LSTM(128, dropout=0.2, recurrent_dropout=0.2)(embedding)
+
+# Concatenate LSTM output with gender input
+merged = Concatenate()([lstm_out, gender_input])
+
+dense = Dense(64, activation='relu')(merged)
+output = Dense(y_train.shape[1], activation='softmax')(dense)
+
+model = Model(inputs=[text_input, gender_input], outputs=output)
 
 model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
 
 # Train the model with gender-weighted sampling
-history = model.fit(X_train, y_train, sample_weight=sample_weights, epochs=10, validation_data=(X_val, y_val))
+history = model.fit([X_train, X_train_gender], y_train, 
+                    sample_weight=sample_weights, 
+                    epochs=10, 
+                    validation_data=([X_val, X_val_gender], y_val))
 
 # Make predictions on the test set
-y_pred = model.predict(X_test)
+y_pred = model.predict([X_test, X_test_gender])
 y_pred_classes = np.argmax(y_pred, axis=1)
 y_test_classes = np.argmax(y_test, axis=1)
 
@@ -141,7 +155,6 @@ y_test_classes = np.argmax(y_test, axis=1)
 test_results_df = test_df.copy()
 test_results_df['y_true'] = y_test_classes
 test_results_df['y_pred'] = y_pred_classes
-test_results_df['Gender'] = test_df['Gender']
 
 # Initialize lists to store results
 results = []
@@ -160,22 +173,18 @@ for i, occupation in enumerate(occupations):
     # Calculate accuracy
     acc = accuracy_score(occ_df['y_true'], occ_df['y_pred'])
     
-    # Calculate TPR and Precision for males and females
+    # Calculate TPR for males and females
     tpr_m = recall_score(occ_df[occ_df['Gender'] == 'Male']['y_true'], occ_df[occ_df['Gender'] == 'Male']['y_pred'], average='macro')
     tpr_f = recall_score(occ_df[occ_df['Gender'] == 'Female']['y_true'], occ_df[occ_df['Gender'] == 'Female']['y_pred'], average='macro')
-    prec_m = precision_score(occ_df[occ_df['Gender'] == 'Male']['y_true'], occ_df[occ_df['Gender'] == 'Male']['y_pred'], average='macro')
-    prec_f = precision_score(occ_df[occ_df['Gender'] == 'Female']['y_true'], occ_df[occ_df['Gender'] == 'Female']['y_pred'], average='macro')
     
-    # Calculate TPR Gap and Precision Gap
+    # Calculate TPR Gap
     tpr_gap = abs(tpr_m - tpr_f)
-    prec_gap = abs(prec_m - prec_f)
     
     # Append results to list
-    results.append([occupation, acc, tpr_m, tpr_f, prec_m, prec_f, tpr_gap, prec_gap])
+    results.append([occupation, acc, tpr_m, tpr_f, tpr_gap])
 
 # Convert results to DataFrame for display
-results_df = pd.DataFrame(results, columns=['Occupation', 'Acc.', 'TPR (M)', 'TPR (F)', 'Prec. (M)', 'Prec. (F)', 'TPR Gap', 'Prec. Gap'])
+results_df = pd.DataFrame(results, columns=['Occupation', 'Acc.', 'TPR (M)', 'TPR (F)', 'TPR Gap'])
 
 # Display the results
 print(results_df)
-
